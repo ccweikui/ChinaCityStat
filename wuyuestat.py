@@ -6,78 +6,79 @@ from bs4 import BeautifulSoup
 import re
 import codecs
 
-class CityStat: 
-	# Get the city list in China.
-	def getCityList(self):
-		url = "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E5%9F%8E%E5%B8%82%E5%88%97%E8%A1%A8"
-		response = requests.get(url)
-		soup = BeautifulSoup(response.text, "lxml")
-		divs = soup.findAll("li")
-		result = []
-		for l in divs:
-			if u'地级市' in l.text.strip() or u'县级市' in l.text.strip() or u'副省级市' in l.text.strip():
-				lists = l.findAll('a')
-				for value in lists:
-					result.append([value["href"], value.text.strip()])
-		result = result[:-4]
-		print len(result)
-		return result
+class WuyueStat:
+	def initWuyueCityList(self):
+		totalCount = 0
+		wuyueList = []
+		for line in open("wuyuelist.txt", "r").readlines():
+			cityName = line.split("（")[0].strip()
+			pattern = re.compile(r'\d+')
+			count = int(pattern.findall(line)[0])
+			totalCount += count
+			wuyueList.append((cityName, count))
+		print totalCount
+		return wuyueList
 
-	def getCityInfo(self):
-		cityList = self.getCityList()
-		prefixURL = "https://zh.wikipedia.org"
+	def initCityInfo(self):
+		cityInfoMap = {}
 		cityInfoList = []
-		for index, (url, name) in enumerate(cityList):
-			if index <= 400:
-				continue
-			if index > 500:
-				break
-			try :
-				cityInfoList.append(self.processEachCity(prefixURL + url, name))
-			except:
-				print "Error:" + url
-		return cityInfoList
-
-	def processEachCity(self, url, name):
-		print url
-		response = requests.get(url)
-		soup = BeautifulSoup(response.text, "lxml")
-		#table = soup.findAll("table", {"class":"infobox vcard"})
-		table = soup.findAll(name = "table", attrs={"class":re.compile(r'infobox.*vcard')})
-		trs = table[0].findAll("tr")
-		totalPeople = 0
-		totalGDP = 0
-		averageGDP = 0
-		pattern = re.compile(r'\d+\d')
-		for tr in trs:
-			th = tr.find("th")
-			td = tr.find("td")
-			if th != None and u'总人口' in th.text.strip():
-				text = td.text.strip().split(u'万')
-				text = text[0].replace(",","")
-				totalPeople = float(pattern.findall(text)[0])
-				print totalPeople
-			if th != None and th.text.strip().startswith(u'GDP') and u'亿' in td.text.strip():
-				text = td.text.strip().split(u'亿')[0].replace(",","").strip()
-				totalGDP = float(pattern.findall(text)[0])
-			if totalPeople > 0 and totalGDP > 0:
-				print totalGDP, totalPeople
-				break
-		if totalGDP == 0:
-			for tr in trs:
-				th = tr.find("th")
-				td = tr.find("td")
-				if th != None and th.text.strip().startswith(u'人均GDP'):
-					print totalGDP
-					print td.text.strip()
-					text = td.text.strip().split(u'元')[0].replace(",","").strip()
-					totalGDP = totalPeople * float(pattern.findall(text)[0]) / 10000
-					break
-		return (name, totalPeople, totalGDP, totalGDP / totalPeople * 10000)
-
-
-	def writeToFile(self, cityInfoList):
-		f = codecs.open('citystatInfo.txt', 'a', 'utf-8')
+		for line in open("citystatInfo.txt", "r").readlines():
+			infoList = line.split()
+			cityName = infoList[0].strip()
+			totalPeople = float(infoList[1])
+			totalGDP = float(infoList[2])
+			averageGDP = float(infoList[3])
+			if (totalGDP > 10 and averageGDP > 10):
+				cityInfoList.append((cityName, totalPeople, totalGDP, averageGDP))
+				cityInfoMap[cityName] = (totalPeople, totalGDP, averageGDP)
+		cityInfoList = sorted(cityInfoList, key = lambda city: city[3], reverse = True)
+		self.writeToFile("cityinfoordered.txt", cityInfoList)
+		print len(cityInfoMap)
+		return cityInfoMap
+	
+	def wuyueStatistics(self, wuyueList, cityInfoMap):
+		statistics = []
+		existWuyue = {}
+		for (cityName, count) in wuyueList:
+			visited = False
+			for name in cityInfoMap.keys():
+				if cityName in name:
+					statistics.append((name, count, cityInfoMap[name][0], cityInfoMap[name][2]))
+					existWuyue[name] = cityInfoMap[name][0]
+					visited = True
+			if not visited:
+				print cityName
+		sortedByPeople = sorted(statistics, key = lambda city: city[2])
+		sortedByGDP = sorted(statistics, key = lambda city: city[3])
+			
+		minPeople = sortedByPeople[0][2]
+		minGDP = sortedByGDP[0][3]
+		averageGDP = sortedByGDP[len(sortedByGDP) / 2][3]
+		averagePeople = sortedByPeople[len(sortedByPeople) / 2][2] 
+		"""
+		for cityInfo in sortedByPeople:
+			averagePeople += cityInfo[2]
+			averageGDP += cityInfo[3]
+		averageGDP = averageGDP / len(sortedByPeople)
+		averagePeople = averagePeople / len(sortedByGDP)	
+		"""
+		print minPeople, averagePeople, minGDP, averageGDP
+		minCityCount = []
+		averageCityCount = []
+		for name in cityInfoMap.keys():
+			if cityInfoMap[name][0] > minPeople and cityInfoMap[name][2] > minGDP:
+				minCityCount.append((name, cityInfoMap[name][0], cityInfoMap[name][2]))
+			if cityInfoMap[name][0] > averagePeople and cityInfoMap[name][2] > averageGDP:
+				averageCityCount.append((name, cityInfoMap[name][0], cityInfoMap[name][2]))
+		potentialCount = 0
+		for cityInfo in minCityCount:
+			if not cityInfo[0] in existWuyue:	
+				potentialCount += 1
+				print cityInfo[0], cityInfo[1], cityInfo[2]
+		print len(minCityCount), len(averageCityCount), potentialCount, len(existWuyue)
+		
+	def writeToFile(self, fileName, cityInfoList):
+		f = codecs.open(fileName, 'a')
 		for (name, totalPeople, totalGDP, avergaeGDP) in cityInfoList:
 			print name, totalPeople, totalGDP, avergaeGDP
 			f.write(name + "\t" + str(totalPeople) + "\t" + str(totalGDP) + "\t" + str(avergaeGDP) + "\n")
@@ -85,6 +86,8 @@ class CityStat:
 	
 
 if __name__ == '__main__':
-	cityStat = CityStat()
-	cityInfoList = cityStat.getCityInfo()
-	cityStat.writeToFile(cityInfoList)
+	wuyueStat = WuyueStat()
+	wuyueList = wuyueStat.initWuyueCityList()
+	cityInfoMap = wuyueStat.initCityInfo()
+	wuyueStat.wuyueStatistics(wuyueList, cityInfoMap)
+	
